@@ -23,7 +23,7 @@ import jax
 import jax.numpy as jnp
 import jaxlib.xla_extension as jax_xla
 from flax.core.frozen_dict import FrozenDict
-from flax.linen import dot_product_attention
+from flax.linen import dot_product_attention_weights
 from jax import lax
 from jax.random import PRNGKey
 
@@ -209,7 +209,7 @@ class FlaxElectraSelfAttention(nn.Module):
             kernel_init=jax.nn.initializers.normal(self.config.initializer_range, self.dtype),
         )
 
-    def __call__(self, hidden_states, attention_mask, deterministic=True, output_attentions: bool = False):
+    def __call__(self, hidden_states, attention_mask, deterministic=True, output_attentions: bool = False, unnorm_attention: bool = False):
         head_dim = self.config.hidden_size // self.config.num_attention_heads
 
         query_states = self.query(hidden_states).reshape(
@@ -238,10 +238,10 @@ class FlaxElectraSelfAttention(nn.Module):
         if not deterministic and self.config.attention_probs_dropout_prob > 0.0:
             dropout_rng = self.make_rng("dropout")
 
-        attn_output = dot_product_attention(
+
+        attn_logits = dot_product_attention_weights(
             query_states,
             key_states,
-            value_states,
             bias=attention_bias,
             dropout_rng=dropout_rng,
             dropout_rate=self.config.attention_probs_dropout_prob,
@@ -249,13 +249,19 @@ class FlaxElectraSelfAttention(nn.Module):
             deterministic=deterministic,
             dtype=self.dtype,
             precision=None,
+            normalization_fn = lambda x: x
+        )
+        attn_weights = jax.nn.softmax(attn_logits)
+        attn_output = jnp.einsum(
+            '...hqk,...khd->...qhd', 
+            attn_weights, 
+            value_states,
+            precision=None
         )
 
         outputs = (attn_output.reshape(attn_output.shape[:2] + (-1,)),)
-
-        # TODO: at the moment it's not possible to retrieve attn_weights from
-        # dot_product_attention, but should be in the future -> add functionality then
-
+        if output_attentions:
+            outputs = outputs + (attn_logits if unnorm_attention else attn_weights,)
         return outputs
 
 
@@ -289,12 +295,12 @@ class FlaxElectraAttention(nn.Module):
         self.self = FlaxElectraSelfAttention(self.config, dtype=self.dtype)
         self.output = FlaxElectraSelfOutput(self.config, dtype=self.dtype)
 
-    def __call__(self, hidden_states, attention_mask, deterministic=True, output_attentions: bool = False):
+    def __call__(self, hidden_states, attention_mask, deterministic=True, output_attentions: bool = False, unnorm_attention: bool = False):
         # Attention mask comes in as attention_mask.shape == (*batch_sizes, kv_length)
         # FLAX expects: attention_mask.shape == (*batch_sizes, 1, 1, kv_length) such that it is broadcastable
         # with attn_weights.shape == (*batch_sizes, num_heads, q_length, kv_length)
         attn_outputs = self.self(
-            hidden_states, attention_mask, deterministic=deterministic, output_attentions=output_attentions
+            hidden_states, attention_mask, deterministic=deterministic, output_attentions=output_attentions, unnorm_attention=unnorm_attention
         )
         attn_output = attn_outputs[0]
         hidden_states = self.output(attn_output, hidden_states, deterministic=deterministic)
@@ -302,7 +308,7 @@ class FlaxElectraAttention(nn.Module):
         outputs = (hidden_states,)
 
         if output_attentions:
-            outputs += attn_outputs[1]
+            outputs = outputs + (attn_outputs[1],)
 
         return outputs
 
@@ -357,9 +363,9 @@ class FlaxElectraLayer(nn.Module):
         self.intermediate = FlaxElectraIntermediate(self.config, dtype=self.dtype)
         self.output = FlaxElectraOutput(self.config, dtype=self.dtype)
 
-    def __call__(self, hidden_states, attention_mask, deterministic: bool = True, output_attentions: bool = False):
+    def __call__(self, hidden_states, attention_mask, deterministic: bool = True, output_attentions: bool = False, unnorm_attention: bool = False):
         attention_outputs = self.attention(
-            hidden_states, attention_mask, deterministic=deterministic, output_attentions=output_attentions
+            hidden_states, attention_mask, deterministic=deterministic, output_attentions=output_attentions, unnorm_attention=unnorm_attention
         )
         attention_output = attention_outputs[0]
 
@@ -368,8 +374,10 @@ class FlaxElectraLayer(nn.Module):
 
         outputs = (hidden_states,)
 
+
         if output_attentions:
-            outputs += (attention_outputs[1],)
+            outputs = outputs + (attention_outputs[1],)
+
         return outputs
 
 
@@ -388,7 +396,7 @@ class FlaxElectraLayerCollection(nn.Module):
         hidden_states,
         attention_mask,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -399,7 +407,7 @@ class FlaxElectraLayerCollection(nn.Module):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
-            layer_outputs = layer(hidden_states, attention_mask, deterministic=deterministic)
+            layer_outputs = layer(hidden_states, attention_mask, deterministic=deterministic, output_attentions=output_attentions, unnorm_attention=unnorm_attention)
 
             hidden_states = layer_outputs[0]
 
@@ -410,6 +418,12 @@ class FlaxElectraLayerCollection(nn.Module):
             all_hidden_states += (hidden_states,)
 
         outputs = (hidden_states,)
+
+        if output_hidden_states:
+            outputs = outputs + (all_hidden_states,)
+
+        if output_attentions:
+            outputs = outputs + (all_attentions,)
 
         if not return_dict:
             return tuple(v for v in outputs if v is not None)
@@ -432,7 +446,7 @@ class FlaxElectraEncoder(nn.Module):
         hidden_states,
         attention_mask,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -442,6 +456,7 @@ class FlaxElectraEncoder(nn.Module):
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            unnorm_attention=unnorm_attention,
             return_dict=return_dict,
         )
 
@@ -534,11 +549,6 @@ class FlaxElectraPreTrainedModel(FlaxPreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.return_dict
 
-        if output_attentions:
-            raise NotImplementedError(
-                "Currently attention scores cannot be returned. Please set `output_attentions` to False for now."
-            )
-
         # init input tensors if not passed
         if token_type_ids is None:
             token_type_ids = jnp.ones_like(input_ids)
@@ -585,7 +595,7 @@ class FlaxElectraModule(nn.Module):
         token_type_ids,
         position_ids,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -601,6 +611,7 @@ class FlaxElectraModule(nn.Module):
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            unnorm_attention=unnorm_attention,
             return_dict=return_dict,
         )
 
@@ -657,7 +668,7 @@ class FlaxElectraForMaskedLMModule(nn.Module):
         token_type_ids=None,
         position_ids=None,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -715,7 +726,7 @@ class FlaxElectraForPreTrainingModule(nn.Module):
         token_type_ids=None,
         position_ids=None,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -797,7 +808,7 @@ class FlaxElectraForTokenClassificationModule(nn.Module):
         token_type_ids=None,
         position_ids=None,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -937,7 +948,7 @@ class FlaxElectraForMultipleChoiceModule(nn.Module):
         token_type_ids=None,
         position_ids=None,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -1013,7 +1024,7 @@ class FlaxElectraForQuestionAnsweringModule(nn.Module):
         token_type_ids=None,
         position_ids=None,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -1101,7 +1112,7 @@ class FlaxElectraForSequenceClassificationModule(nn.Module):
         token_type_ids=None,
         position_ids=None,
         deterministic: bool = True,
-        output_attentions: bool = False,
+        output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -1113,6 +1124,7 @@ class FlaxElectraForSequenceClassificationModule(nn.Module):
             position_ids,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
