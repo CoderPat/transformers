@@ -203,6 +203,7 @@ class FlaxMultiHeadSelfAttention(nn.Module):
         mask,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False
     ):
 
         bs, q_len, dim = query.shape
@@ -241,7 +242,7 @@ class FlaxMultiHeadSelfAttention(nn.Module):
         context = self.out_lin(context)  # (bs, q_len, dim)
 
         if output_attentions:
-            return (context, weights)
+            return (context, scores if unnorm_attention else weights)
         else:
             return (context,)
 
@@ -298,6 +299,7 @@ class FlaxTransformerBlock(nn.Module):
         hidden_states,
         attn_mask,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         deterministic: bool = True,
     ):
         # Self-Attention
@@ -307,6 +309,7 @@ class FlaxTransformerBlock(nn.Module):
             value=hidden_states,
             mask=attn_mask,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             deterministic=deterministic,
         )
         if output_attentions:
@@ -339,6 +342,7 @@ class FlaxTransformer(nn.Module):
         hidden_states,
         attention_mask,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         deterministic: bool = True,
         return_dict: bool = False,
@@ -354,6 +358,7 @@ class FlaxTransformer(nn.Module):
                 hidden_states=hidden_states,
                 attn_mask=attention_mask,
                 output_attentions=output_attentions,
+                unnorm_attention=unnorm_attention,
                 deterministic=deterministic,
             )
             hidden_states = layer_outputs[-1]
@@ -388,6 +393,7 @@ class FlaxTransformerEncoder(nn.Module):
         hidden_states,
         attention_mask,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         deterministic: bool = True,
         return_dict: bool = False,
@@ -396,6 +402,7 @@ class FlaxTransformerEncoder(nn.Module):
             hidden_states=hidden_states,
             attention_mask=attention_mask,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             deterministic=deterministic,
             return_dict=return_dict,
@@ -503,6 +510,7 @@ class FlaxDistilBertModule(nn.Module):
         attention_mask,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -518,6 +526,7 @@ class FlaxDistilBertModule(nn.Module):
             attention_mask=attention_mask,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
@@ -632,6 +641,7 @@ class FlaxDistilBertForSequenceClassificationModule(nn.Module):
         attention_mask,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -642,6 +652,7 @@ class FlaxDistilBertForSequenceClassificationModule(nn.Module):
             attention_mask,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )

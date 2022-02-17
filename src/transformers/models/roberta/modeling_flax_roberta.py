@@ -209,6 +209,7 @@ class FlaxRobertaSelfAttention(nn.Module):
         layer_head_mask,
         deterministic=True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
     ):
         head_dim = self.config.hidden_size // self.config.num_attention_heads
 
@@ -238,7 +239,7 @@ class FlaxRobertaSelfAttention(nn.Module):
         if not deterministic and self.config.attention_probs_dropout_prob > 0.0:
             dropout_rng = self.make_rng("dropout")
 
-        attn_weights = dot_product_attention_weights(
+        attn_logits = dot_product_attention_weights(
             query_states,
             key_states,
             bias=attention_bias,
@@ -248,7 +249,10 @@ class FlaxRobertaSelfAttention(nn.Module):
             deterministic=deterministic,
             dtype=self.dtype,
             precision=None,
+            normalization_fn=lambda x: x
         )
+
+        attn_weights = nn.softmax(attn_logits)
 
         # Mask heads if we want to
         if layer_head_mask is not None:
@@ -257,7 +261,7 @@ class FlaxRobertaSelfAttention(nn.Module):
         attn_output = jnp.einsum("...hqk,...khd->...qhd", attn_weights, value_states)
         attn_output = attn_output.reshape(attn_output.shape[:2] + (-1,))
 
-        outputs = (attn_output, attn_weights) if output_attentions else (attn_output,)
+        outputs = (attn_output, attn_logits if unnorm_attention else attn_weights) if output_attentions else (attn_output,)
         return outputs
 
 
@@ -298,6 +302,7 @@ class FlaxRobertaAttention(nn.Module):
         layer_head_mask,
         deterministic=True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
     ):
         # Attention mask comes in as attention_mask.shape == (*batch_sizes, kv_length)
         # FLAX expects: attention_mask.shape == (*batch_sizes, 1, 1, kv_length) such that it is broadcastable
@@ -308,6 +313,7 @@ class FlaxRobertaAttention(nn.Module):
             layer_head_mask=layer_head_mask,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
         )
         attn_output = attn_outputs[0]
         hidden_states = self.output(attn_output, hidden_states, deterministic=deterministic)
@@ -377,6 +383,7 @@ class FlaxRobertaLayer(nn.Module):
         layer_head_mask,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
     ):
         attention_outputs = self.attention(
             hidden_states,
@@ -384,6 +391,7 @@ class FlaxRobertaLayer(nn.Module):
             layer_head_mask=layer_head_mask,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
         )
         attention_output = attention_outputs[0]
 
@@ -414,6 +422,7 @@ class FlaxRobertaLayerCollection(nn.Module):
         head_mask,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -438,6 +447,7 @@ class FlaxRobertaLayerCollection(nn.Module):
                 layer_head_mask=head_mask[i] if head_mask is not None else None,
                 deterministic=deterministic,
                 output_attentions=output_attentions,
+                unnorm_attention=unnorm_attention,
             )
 
             hidden_states = layer_outputs[0]
@@ -448,7 +458,7 @@ class FlaxRobertaLayerCollection(nn.Module):
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
-        outputs = (hidden_states,)
+        outputs = (hidden_states, all_hidden_states, all_attentions)
 
         if not return_dict:
             return tuple(v for v in outputs if v is not None)
@@ -473,6 +483,7 @@ class FlaxRobertaEncoder(nn.Module):
         head_mask,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -482,6 +493,7 @@ class FlaxRobertaEncoder(nn.Module):
             head_mask=head_mask,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
@@ -683,6 +695,7 @@ class FlaxRobertaModule(nn.Module):
         head_mask: Optional[np.ndarray] = None,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -703,6 +716,7 @@ class FlaxRobertaModule(nn.Module):
             head_mask=head_mask,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
@@ -817,9 +831,10 @@ class FlaxRobertaForSequenceClassificationModule(nn.Module):
         attention_mask,
         token_type_ids,
         position_ids,
-        head_mask,
+        head_mask = None,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -833,6 +848,7 @@ class FlaxRobertaForSequenceClassificationModule(nn.Module):
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            unnorm_attention=unnorm_attention,
             return_dict=return_dict,
         )
 

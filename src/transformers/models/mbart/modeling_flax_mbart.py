@@ -329,6 +329,7 @@ class FlaxMBartAttention(nn.Module):
         attention_mask: Optional[jnp.ndarray] = None,
         init_cache: bool = False,
         deterministic: bool = True,
+        unnorm_attention: bool = False
     ) -> Tuple[jnp.ndarray]:
         """Input shape: Batch x Time x Channel"""
 
@@ -397,7 +398,7 @@ class FlaxMBartAttention(nn.Module):
         if not deterministic and self.dropout > 0.0:
             dropout_rng = self.make_rng("dropout")
 
-        attn_weights = dot_product_attention_weights(
+        attn_logits = dot_product_attention_weights(
             query_states,
             key_states,
             bias=attention_bias,
@@ -407,13 +408,15 @@ class FlaxMBartAttention(nn.Module):
             deterministic=deterministic,
             dtype=self.dtype,
             precision=None,
+            normalization_fn = lambda x: x
         )
+        attn_weights = jax.nn.softmax(attn_logits)
 
         attn_output = jnp.einsum("...hqk,...khd->...qhd", attn_weights, value_states)
         attn_output = self._merge_heads(attn_output)
         attn_output = self.out_proj(attn_output)
 
-        return attn_output, attn_weights
+        return attn_output, (attn_logits if unnorm_attention else attn_weights)
 
 
 class FlaxMBartEncoderLayer(nn.Module):
@@ -448,11 +451,12 @@ class FlaxMBartEncoderLayer(nn.Module):
         hidden_states: jnp.ndarray,
         attention_mask: jnp.ndarray,
         output_attentions: bool = True,
+        unnorm_attention: bool = False,
         deterministic: bool = True,
     ) -> Tuple[jnp.ndarray]:
         residual = hidden_states
         hidden_states = self.self_attn_layer_norm(hidden_states)
-        hidden_states, attn_weights = self.self_attn(hidden_states=hidden_states, attention_mask=attention_mask)
+        hidden_states, attn_weights = self.self_attn(hidden_states=hidden_states, attention_mask=attention_mask, unnorm_attention=unnorm_attention, deterministic=deterministic)
         hidden_states = self.dropout_layer(hidden_states, deterministic=deterministic)
         hidden_states = residual + hidden_states
 
@@ -490,6 +494,7 @@ class FlaxMBartEncoderLayerCollection(nn.Module):
         attention_mask,
         deterministic: bool = True,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -508,7 +513,8 @@ class FlaxMBartEncoderLayerCollection(nn.Module):
                     hidden_states,
                     attention_mask,
                     output_attentions,
-                    deterministic,
+                    unnorm_attention=unnorm_attention,
+                    deterministic=deterministic,
                 )
             hidden_states = layer_outputs[0]
             if output_attentions:
@@ -572,6 +578,7 @@ class FlaxMBartDecoderLayer(nn.Module):
         encoder_attention_mask: Optional[jnp.ndarray] = None,
         init_cache: bool = False,
         output_attentions: bool = True,
+        unnorm_attention: bool = False,
         deterministic: bool = True,
     ) -> Tuple[jnp.ndarray]:
         residual = hidden_states
@@ -579,7 +586,7 @@ class FlaxMBartDecoderLayer(nn.Module):
 
         # Self Attention
         hidden_states, self_attn_weights = self.self_attn(
-            hidden_states=hidden_states, attention_mask=attention_mask, init_cache=init_cache
+            hidden_states=hidden_states, attention_mask=attention_mask, unnorm_attention=unnorm_attention, init_cache=init_cache
         )
         hidden_states = self.dropout_layer(hidden_states, deterministic=deterministic)
         hidden_states = residual + hidden_states
@@ -594,6 +601,7 @@ class FlaxMBartDecoderLayer(nn.Module):
                 hidden_states=hidden_states,
                 key_value_states=encoder_hidden_states,
                 attention_mask=encoder_attention_mask,
+                unnorm_attention=unnorm_attention,
             )
             hidden_states = self.dropout_layer(hidden_states, deterministic=deterministic)
             hidden_states = residual + hidden_states
@@ -636,6 +644,7 @@ class FlaxMBartDecoderLayerCollection(nn.Module):
         deterministic: bool = True,
         init_cache: bool = False,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -659,6 +668,7 @@ class FlaxMBartDecoderLayerCollection(nn.Module):
                     encoder_attention_mask=encoder_attention_mask,
                     init_cache=init_cache,
                     output_attentions=output_attentions,
+                    unnorm_attention=unnorm_attention,
                     deterministic=deterministic,
                 )
 
@@ -754,6 +764,7 @@ class FlaxMBartEncoder(nn.Module):
         attention_mask,
         position_ids,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
         deterministic: bool = True,
@@ -774,6 +785,7 @@ class FlaxMBartEncoder(nn.Module):
             attention_mask,
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
@@ -833,6 +845,7 @@ class FlaxMBartDecoder(nn.Module):
         encoder_attention_mask: Optional[jnp.ndarray] = None,
         init_cache: bool = False,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
         deterministic: bool = True,
@@ -858,6 +871,7 @@ class FlaxMBartDecoder(nn.Module):
             deterministic=deterministic,
             init_cache=init_cache,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
@@ -906,6 +920,7 @@ class FlaxMBartModule(nn.Module):
         position_ids,
         decoder_position_ids,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
         deterministic: bool = True,
@@ -915,6 +930,7 @@ class FlaxMBartModule(nn.Module):
             attention_mask=attention_mask,
             position_ids=position_ids,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             deterministic=deterministic,
@@ -927,6 +943,7 @@ class FlaxMBartModule(nn.Module):
             encoder_hidden_states=encoder_outputs[0],
             encoder_attention_mask=attention_mask,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             deterministic=deterministic,
@@ -1214,6 +1231,7 @@ class FlaxMBartPreTrainedModel(FlaxPreTrainedModel):
         position_ids: Optional[jnp.ndarray] = None,
         decoder_position_ids: Optional[jnp.ndarray] = None,
         output_attentions: Optional[bool] = None,
+        unnorm_attention: bool = False,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         train: bool = False,
@@ -1603,6 +1621,7 @@ class FlaxMBartForSequenceClassificationModule(nn.Module):
         position_ids,
         decoder_position_ids,
         output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
         deterministic: bool = True,
@@ -1615,6 +1634,7 @@ class FlaxMBartForSequenceClassificationModule(nn.Module):
             position_ids=position_ids,
             decoder_position_ids=decoder_position_ids,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             deterministic=deterministic,
@@ -1622,7 +1642,7 @@ class FlaxMBartForSequenceClassificationModule(nn.Module):
 
         hidden_states = outputs[0]  # last hidden state
 
-        eos_mask = jnp.where(input_ids == self.config.eos_token_id, 1, 0)
+        eos_mask = jnp.where(decoder_input_ids == self.config.eos_token_id, 1, 0)
 
         # The first condition is necessary to overcome jax._src.errors.ConcretizationTypeError during JIT compilation
         if type(eos_mask) != jax.interpreters.partial_eval.DynamicJaxprTracer:
@@ -1636,6 +1656,7 @@ class FlaxMBartForSequenceClassificationModule(nn.Module):
             eos_mask_noised = eos_mask + jnp.arange(eos_mask.shape[1]) * 1e-6
             eos_mask = jnp.where(eos_mask_noised == eos_mask_noised.max(1).reshape(-1, 1), 1, 0)
 
+        print(hidden_states.shape, eos_mask.shape)
         sentence_representation = jnp.einsum("ijk, ij -> ijk", hidden_states, eos_mask).sum(1)
         logits = self.classification_head(sentence_representation, deterministic=deterministic)
 
