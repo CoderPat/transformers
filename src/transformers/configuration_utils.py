@@ -811,6 +811,9 @@ class PretrainedConfig(PushToHubMixin):
         if d.get("torch_dtype", None) is not None and not isinstance(d["torch_dtype"], str):
             d["torch_dtype"] = str(d["torch_dtype"]).split(".")[1]
 
+    def __hash__(self) -> int:
+        return hash(self.to_json_string())
+
 
 def get_configuration_file(
     path_or_repo: Union[str, os.PathLike],
