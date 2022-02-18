@@ -134,10 +134,6 @@ class FlaxModelTesterMixin:
     def test_model_outputs_equivalence(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
 
-        def set_nan_tensor_to_zero(t):
-            t[t != t] = 0
-            return t
-
         def check_equivalence(model, tuple_inputs, dict_inputs, additional_kwargs={}):
             tuple_output = model(**tuple_inputs, return_dict=False, **additional_kwargs)
             dict_output = model(**dict_inputs, return_dict=True, **additional_kwargs).to_tuple()
@@ -149,11 +145,9 @@ class FlaxModelTesterMixin:
                 elif tuple_object is None:
                     return
                 else:
-                    self.assert_almost_equals(
-                        set_nan_tensor_to_zero(tuple_object), set_nan_tensor_to_zero(dict_object), 1e-5
-                    )
+                    self.assert_almost_equals(jnp.nan_to_num(tuple_object), jnp.nan_to_num(dict_object), 1e-5)
 
-                recursive_check(tuple_output, dict_output)
+            recursive_check(tuple_output, dict_output)
 
         for model_class in self.all_model_classes:
             model = model_class(config)
@@ -777,6 +771,13 @@ class FlaxModelTesterMixin:
             types = flatten_dict(jax.tree_map(lambda x: x.dtype, model.params))
             for name, type_ in types.items():
                 self.assertEqual(type_, jnp.bfloat16, msg=f"param {name} is not in bf16.")
+
+    def test_model_main_input_name(self):
+        for model_class in self.all_model_classes:
+            model_signature = inspect.signature(getattr(model_class, "__call__"))
+            # The main input is the name of the argument after `self`
+            observed_main_input_name = list(model_signature.parameters.keys())[1]
+            self.assertEqual(model_class.main_input_name, observed_main_input_name)
 
     def test_headmasking(self):
         if not self.test_head_masking:
