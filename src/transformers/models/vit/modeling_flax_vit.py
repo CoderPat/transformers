@@ -164,7 +164,7 @@ class FlaxViTSelfAttention(nn.Module):
             use_bias=self.config.qkv_bias,
         )
 
-    def __call__(self, hidden_states, deterministic: bool = True, output_attentions: bool = False):
+    def __call__(self, hidden_states, deterministic: bool = True, output_attentions: bool = False, unnorm_attention: bool = False):
         head_dim = self.config.hidden_size // self.config.num_attention_heads
 
         query_states = self.query(hidden_states).reshape(
@@ -181,7 +181,7 @@ class FlaxViTSelfAttention(nn.Module):
         if not deterministic and self.config.attention_probs_dropout_prob > 0.0:
             dropout_rng = self.make_rng("dropout")
 
-        attn_weights = dot_product_attention_weights(
+        attn_logits = dot_product_attention_weights(
             query_states,
             key_states,
             dropout_rng=dropout_rng,
@@ -190,12 +190,15 @@ class FlaxViTSelfAttention(nn.Module):
             deterministic=deterministic,
             dtype=self.dtype,
             precision=None,
+            normalization_fn=lambda x: x
         )
+
+        attn_weights = nn.softmax(attn_logits)
 
         attn_output = jnp.einsum("...hqk,...khd->...qhd", attn_weights, value_states)
         attn_output = attn_output.reshape(attn_output.shape[:2] + (-1,))
 
-        outputs = (attn_output, attn_weights) if output_attentions else (attn_output,)
+        outputs = (attn_output, attn_logits if unnorm_attention else attn_weights) if output_attentions else (attn_output,)
         return outputs
 
 
@@ -225,8 +228,8 @@ class FlaxViTAttention(nn.Module):
         self.attention = FlaxViTSelfAttention(self.config, dtype=self.dtype)
         self.output = FlaxViTSelfOutput(self.config, dtype=self.dtype)
 
-    def __call__(self, hidden_states, deterministic=True, output_attentions: bool = False):
-        attn_outputs = self.attention(hidden_states, deterministic=deterministic, output_attentions=output_attentions)
+    def __call__(self, hidden_states, deterministic=True, output_attentions: bool = False, unnorm_attention: bool = False):
+        attn_outputs = self.attention(hidden_states, deterministic=deterministic, output_attentions=output_attentions, unnorm_attention=unnorm_attention)
         attn_output = attn_outputs[0]
         hidden_states = self.output(attn_output, hidden_states, deterministic=deterministic)
 
@@ -286,11 +289,12 @@ class FlaxViTLayer(nn.Module):
         self.layernorm_before = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
         self.layernorm_after = nn.LayerNorm(epsilon=self.config.layer_norm_eps, dtype=self.dtype)
 
-    def __call__(self, hidden_states, deterministic: bool = True, output_attentions: bool = False):
+    def __call__(self, hidden_states, deterministic: bool = True, output_attentions: bool = False, unnorm_attention: bool=False):
         attention_outputs = self.attention(
             self.layernorm_before(hidden_states),  # in ViT, layernorm is applied before self-attention
             deterministic=deterministic,
             output_attentions=output_attentions,
+            unnorm_attention=unnorm_attention
         )
 
         attention_output = attention_outputs[0]
@@ -326,6 +330,7 @@ class FlaxViTLayerCollection(nn.Module):
         deterministic: bool = True,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
+        unnorm_attention: bool = False,
         return_dict: bool = True,
     ):
 
@@ -336,7 +341,7 @@ class FlaxViTLayerCollection(nn.Module):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
-            layer_outputs = layer(hidden_states, deterministic=deterministic, output_attentions=output_attentions)
+            layer_outputs = layer(hidden_states, deterministic=deterministic, output_attentions=output_attentions, unnorm_attention=unnorm_attention)
 
             hidden_states = layer_outputs[0]
 
@@ -346,7 +351,7 @@ class FlaxViTLayerCollection(nn.Module):
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
-        outputs = (hidden_states,)
+        outputs = (hidden_states, all_hidden_states, all_attentions)
         if not return_dict:
             return tuple(v for v in outputs if v is not None)
 
@@ -368,6 +373,7 @@ class FlaxViTEncoder(nn.Module):
         deterministic: bool = True,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
+        unnorm_attention: bool = False,
         return_dict: bool = True,
     ):
         return self.layer(
@@ -375,6 +381,7 @@ class FlaxViTEncoder(nn.Module):
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            unnorm_attention=unnorm_attention,
             return_dict=return_dict,
         )
 
@@ -473,6 +480,7 @@ class FlaxViTModule(nn.Module):
         deterministic: bool = True,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
+        unnorm_attention: bool = False,
         return_dict: bool = True,
     ):
 
@@ -483,6 +491,7 @@ class FlaxViTModule(nn.Module):
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            unnorm_attention=unnorm_attention,
             return_dict=return_dict,
         )
         hidden_states = outputs[0]
@@ -555,6 +564,7 @@ class FlaxViTForImageClassificationModule(nn.Module):
         deterministic: bool = True,
         output_attentions=None,
         output_hidden_states=None,
+        unnorm_attention=False,
         return_dict=None,
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -564,6 +574,7 @@ class FlaxViTForImageClassificationModule(nn.Module):
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            unnorm_attention=unnorm_attention,
             return_dict=return_dict,
         )
 
@@ -571,7 +582,7 @@ class FlaxViTForImageClassificationModule(nn.Module):
         logits = self.classifier(hidden_states[:, 0, :])
 
         if not return_dict:
-            output = (logits,) + outputs[2:]
+            output = (logits,) + outputs[1:]
             return output
 
         return FlaxSequenceClassifierOutput(
