@@ -243,6 +243,7 @@ class FlaxBertSelfAttention(nn.Module):
         hidden_states,
         attention_mask,
         layer_head_mask,
+        attn_weights=None,
         deterministic=True,
         output_attentions: bool = False,
         unnorm_attention: bool = False
@@ -287,7 +288,9 @@ class FlaxBertSelfAttention(nn.Module):
             precision=None,
             normalization_fn=lambda x: x
         )
-        attn_weights = jax.nn.softmax(attn_logits)
+
+        if attn_weights is None:
+            attn_weights = jax.nn.softmax(attn_logits)
 
         # Mask heads if we want to
         if layer_head_mask is not None:
@@ -333,6 +336,7 @@ class FlaxBertAttention(nn.Module):
         hidden_states,
         attention_mask,
         layer_head_mask,
+        attn_weights=None,
         deterministic=True,
         output_attentions: bool = False,
         unnorm_attention: bool = False
@@ -344,6 +348,7 @@ class FlaxBertAttention(nn.Module):
             hidden_states,
             attention_mask,
             layer_head_mask=layer_head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -411,6 +416,7 @@ class FlaxBertLayer(nn.Module):
         hidden_states,
         attention_mask,
         layer_head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False
@@ -419,6 +425,7 @@ class FlaxBertLayer(nn.Module):
             hidden_states,
             attention_mask,
             layer_head_mask=layer_head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -449,6 +456,7 @@ class FlaxBertLayerCollection(nn.Module):
         hidden_states,
         attention_mask,
         head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -474,6 +482,7 @@ class FlaxBertLayerCollection(nn.Module):
                 hidden_states,
                 attention_mask,
                 layer_head_mask=head_mask[i] if head_mask is not None else None,
+                attn_weights=attn_weights,
                 deterministic=deterministic,
                 output_attentions=output_attentions,
                 unnorm_attention=unnorm_attention,
@@ -509,6 +518,7 @@ class FlaxBertEncoder(nn.Module):
         hidden_states,
         attention_mask,
         head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -519,6 +529,7 @@ class FlaxBertEncoder(nn.Module):
             hidden_states,
             attention_mask,
             head_mask=head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -720,6 +731,7 @@ class FlaxBertModule(nn.Module):
         token_type_ids: Optional[np.ndarray] = None,
         position_ids: Optional[np.ndarray] = None,
         head_mask: Optional[np.ndarray] = None,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -741,6 +753,7 @@ class FlaxBertModule(nn.Module):
             hidden_states,
             attention_mask,
             head_mask=head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -1046,6 +1059,7 @@ class FlaxBertForSequenceClassificationModule(nn.Module):
         token_type_ids,
         position_ids,
         head_mask = None,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -1059,6 +1073,7 @@ class FlaxBertForSequenceClassificationModule(nn.Module):
             token_type_ids,
             position_ids,
             head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,

@@ -199,6 +199,7 @@ class RobertaSelfAttention(nn.Module):
         encoder_attention_mask=None,
         past_key_value=None,
         output_attentions=False,
+        attn_weights=None,
     ):
         mixed_query_layer = self.query(hidden_states)
 
@@ -262,7 +263,10 @@ class RobertaSelfAttention(nn.Module):
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        if attn_weights is None:
+            attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        else:
+            attention_probs = attn_weights
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -335,6 +339,7 @@ class RobertaAttention(nn.Module):
         encoder_attention_mask=None,
         past_key_value=None,
         output_attentions=False,
+        attn_weights=None,
     ):
         self_outputs = self.self(
             hidden_states,
@@ -344,6 +349,7 @@ class RobertaAttention(nn.Module):
             encoder_attention_mask,
             past_key_value,
             output_attentions,
+            attn_weights,
         )
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
@@ -406,6 +412,7 @@ class RobertaLayer(nn.Module):
         encoder_attention_mask=None,
         past_key_value=None,
         output_attentions=False,
+        attn_weights=None,
     ):
         # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
         self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
@@ -415,6 +422,7 @@ class RobertaLayer(nn.Module):
             head_mask,
             output_attentions=output_attentions,
             past_key_value=self_attn_past_key_value,
+            attn_weights=attn_weights,
         )
         attention_output = self_attention_outputs[0]
 
@@ -487,6 +495,7 @@ class RobertaEncoder(nn.Module):
         output_attentions=False,
         output_hidden_states=False,
         return_dict=True,
+        attn_weights=None,
     ):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
@@ -521,6 +530,7 @@ class RobertaEncoder(nn.Module):
                     layer_head_mask,
                     encoder_hidden_states,
                     encoder_attention_mask,
+                    attn_weights=attn_weights,
                 )
             else:
                 layer_outputs = layer_module(
@@ -531,6 +541,7 @@ class RobertaEncoder(nn.Module):
                     encoder_attention_mask,
                     past_key_value,
                     output_attentions,
+                    attn_weights=attn_weights,
                 )
 
             hidden_states = layer_outputs[0]
@@ -759,6 +770,7 @@ class RobertaModel(RobertaPreTrainedModel):
         use_cache=None,
         output_attentions=None,
         output_hidden_states=None,
+        attn_weights=None,
         return_dict=None,
     ):
         r"""
@@ -857,6 +869,7 @@ class RobertaModel(RobertaPreTrainedModel):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            attn_weights=attn_weights,
             return_dict=return_dict,
         )
         sequence_output = encoder_outputs[0]
@@ -1191,6 +1204,7 @@ class RobertaForSequenceClassification(RobertaPreTrainedModel):
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
+        attn_weights=None,
         return_dict=None,
     ):
         r"""
@@ -1210,6 +1224,7 @@ class RobertaForSequenceClassification(RobertaPreTrainedModel):
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            attn_weights=attn_weights,
             return_dict=return_dict,
         )
         sequence_output = outputs[0]
