@@ -204,6 +204,7 @@ class FlaxRobertaSelfAttention(nn.Module):
         hidden_states,
         attention_mask,
         layer_head_mask,
+        attn_weights=None,
         deterministic=True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -249,7 +250,8 @@ class FlaxRobertaSelfAttention(nn.Module):
             normalization_fn=lambda x: x
         )
 
-        attn_weights = nn.softmax(attn_logits)
+        if attn_weights is None:
+            attn_weights = jax.nn.softmax(attn_logits)
 
         # Mask heads if we want to
         if layer_head_mask is not None:
@@ -297,6 +299,7 @@ class FlaxRobertaAttention(nn.Module):
         hidden_states,
         attention_mask,
         layer_head_mask,
+        attn_weights=None,
         deterministic=True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -308,6 +311,7 @@ class FlaxRobertaAttention(nn.Module):
             hidden_states,
             attention_mask,
             layer_head_mask=layer_head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -378,6 +382,7 @@ class FlaxRobertaLayer(nn.Module):
         hidden_states,
         attention_mask,
         layer_head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -386,6 +391,7 @@ class FlaxRobertaLayer(nn.Module):
             hidden_states,
             attention_mask,
             layer_head_mask=layer_head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -417,6 +423,7 @@ class FlaxRobertaLayerCollection(nn.Module):
         hidden_states,
         attention_mask,
         head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -442,6 +449,7 @@ class FlaxRobertaLayerCollection(nn.Module):
                 hidden_states,
                 attention_mask,
                 layer_head_mask=head_mask[i] if head_mask is not None else None,
+                attn_weights=attn_weights,
                 deterministic=deterministic,
                 output_attentions=output_attentions,
                 unnorm_attention=unnorm_attention,
@@ -478,6 +486,7 @@ class FlaxRobertaEncoder(nn.Module):
         hidden_states,
         attention_mask,
         head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -488,6 +497,7 @@ class FlaxRobertaEncoder(nn.Module):
             hidden_states,
             attention_mask,
             head_mask=head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -690,6 +700,7 @@ class FlaxRobertaModule(nn.Module):
         token_type_ids: Optional[np.ndarray] = None,
         position_ids: Optional[np.ndarray] = None,
         head_mask: Optional[np.ndarray] = None,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -711,6 +722,7 @@ class FlaxRobertaModule(nn.Module):
             hidden_states,
             attention_mask,
             head_mask=head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -829,6 +841,7 @@ class FlaxRobertaForSequenceClassificationModule(nn.Module):
         token_type_ids,
         position_ids,
         head_mask = None,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False,
         unnorm_attention: bool = False,
@@ -842,6 +855,7 @@ class FlaxRobertaForSequenceClassificationModule(nn.Module):
             token_type_ids,
             position_ids,
             head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
