@@ -213,7 +213,8 @@ class FlaxElectraSelfAttention(nn.Module):
         self, 
         hidden_states, 
         attention_mask, 
-        layer_head_mask, 
+        layer_head_mask,
+        attn_weights=None,
         deterministic=True, 
         output_attentions: bool = False, 
         unnorm_attention: bool = False
@@ -246,7 +247,6 @@ class FlaxElectraSelfAttention(nn.Module):
         if not deterministic and self.config.attention_probs_dropout_prob > 0.0:
             dropout_rng = self.make_rng("dropout")
 
-
         attn_logits = dot_product_attention_weights(
             query_states,
             key_states,
@@ -259,7 +259,10 @@ class FlaxElectraSelfAttention(nn.Module):
             precision=None,
             normalization_fn = lambda x: x
         )
-        attn_weights = jax.nn.softmax(attn_logits)
+
+        if attn_weights is None:
+            attn_weights = jax.nn.softmax(attn_logits)
+
         # Mask heads if we want to
         if layer_head_mask is not None:
             attn_weights = jnp.einsum("...hqk,h->...hqk", attn_weights, layer_head_mask)
@@ -313,7 +316,8 @@ class FlaxElectraAttention(nn.Module):
         hidden_states, 
         attention_mask, 
         layer_head_mask, 
-        deterministic=True, 
+        deterministic=True,
+        attn_weights=None,
         output_attentions: bool = False, 
         unnorm_attention: bool = False
     ):
@@ -324,6 +328,7 @@ class FlaxElectraAttention(nn.Module):
             hidden_states,
             attention_mask,
             layer_head_mask=layer_head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention
@@ -393,7 +398,8 @@ class FlaxElectraLayer(nn.Module):
         self, 
         hidden_states, 
         attention_mask, 
-        layer_head_mask, 
+        layer_head_mask,
+        attn_weights=None,
         deterministic=True, 
         output_attentions: bool = False, 
         unnorm_attention: bool = False
@@ -402,6 +408,7 @@ class FlaxElectraLayer(nn.Module):
             hidden_states,
             attention_mask,
             layer_head_mask=layer_head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
@@ -435,6 +442,7 @@ class FlaxElectraLayerCollection(nn.Module):
         hidden_states,
         attention_mask,
         head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
@@ -459,6 +467,7 @@ class FlaxElectraLayerCollection(nn.Module):
                 hidden_states,
                 attention_mask,
                 layer_head_mask=head_mask[i] if head_mask is not None else None,
+                attn_weights=attn_weights,
                 deterministic=deterministic,
                 output_attentions=output_attentions,
                 unnorm_attention=unnorm_attention,
@@ -501,6 +510,7 @@ class FlaxElectraEncoder(nn.Module):
         hidden_states,
         attention_mask,
         head_mask,
+        attn_weights=None,
         deterministic: bool = True,
         output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
@@ -510,6 +520,7 @@ class FlaxElectraEncoder(nn.Module):
             hidden_states,
             attention_mask,
             head_mask=head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
@@ -658,6 +669,7 @@ class FlaxElectraModule(nn.Module):
         token_type_ids,
         position_ids,
         head_mask: Optional[np.ndarray] = None,
+        attn_weights: Optional[np.ndarray] = None,
         deterministic: bool = True,
         output_attentions: bool = False, unnorm_attention: bool = False,
         output_hidden_states: bool = False,
@@ -673,6 +685,7 @@ class FlaxElectraModule(nn.Module):
             embeddings,
             attention_mask,
             head_mask=head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
@@ -1198,8 +1211,10 @@ class FlaxElectraForSequenceClassificationModule(nn.Module):
         token_type_ids=None,
         position_ids=None,
         head_mask=None,
+        attn_weights=None,
         deterministic: bool = True,
-        output_attentions: bool = False, unnorm_attention: bool = False,
+        output_attentions: bool = False,
+        unnorm_attention: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
@@ -1210,6 +1225,7 @@ class FlaxElectraForSequenceClassificationModule(nn.Module):
             token_type_ids,
             position_ids,
             head_mask,
+            attn_weights=attn_weights,
             deterministic=deterministic,
             output_attentions=output_attentions,
             unnorm_attention=unnorm_attention,
